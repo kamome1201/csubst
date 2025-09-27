@@ -18,23 +18,22 @@ from csubst import table
 from csubst import tree
 
 def cb_search(g, b, S_tensor, N_tensor, id_combinations, write_cb=True):
-    end_flag = 0
-    g = param.initialize_df_cb_stats(g)
     for current_arity in numpy.arange(2, g['max_arity'] + 1):
         start = time.time()
-        print("Arity (K) = {:,}: Generating cb table".format(current_arity), flush=True)
         g['current_arity'] = current_arity
+        g = param.initialize_df_cb_stats(g)
+        print("Arity (K) = {:,}: Generating cb table".format(current_arity), flush=True)
         if (current_arity==2):
             if (g['exhaustive_until']<current_arity)&(g['foreground'] is not None):
                 txt = 'Arity (K) = {:,}: Targeted search of foreground branch combinations'
                 print(txt.format(current_arity), flush=True)
-                g['df_cb_stats'].loc[current_arity-1, 'mode'] = 'foreground'
+                g['df_cb_stats'].at[0, 'mode'] = 'foreground'
                 g,id_combinations = combination.get_node_combinations(g=g, target_id_dict=g['target_ids'],
                                                                       arity=current_arity, check_attr='name')
             else:
                 txt = 'Arity (K) = {:,}: Exhaustive search with all independent branch combinations'
                 print(txt.format(current_arity), flush=True)
-                g['df_cb_stats'].loc[current_arity-1, 'mode'] = 'exhaustive'
+                g['df_cb_stats'].at[0, 'mode'] = 'exhaustive'
                 g,id_combinations = combination.get_node_combinations(g=g, exhaustive=True,
                                                                       arity=current_arity, check_attr="name")
         elif (current_arity >= 3):
@@ -50,7 +49,7 @@ def cb_search(g, b, S_tensor, N_tensor, id_combinations, write_cb=True):
                 num_branch_ids = is_stat_enough.sum()
                 txt = 'Arity (K) = {:,}: Heuristic search with {:,} K-1 branch combinations that passed cutoff stats ({})'
                 print(txt.format(current_arity, num_branch_ids, g['cutoff_stat']), flush=True)
-                g['df_cb_stats'].loc[current_arity - 1, 'mode'] = 'branch_and_bound'
+                g['df_cb_stats'].at[0, 'mode'] = 'branch_and_bound'
                 if is_stat_enough.sum() > g['max_combination']:
                     txt = 'Arity (K) = {:,}: Search will be limited to {:,} of {:,} K-1 branch combinations (see --max_combination)\n'
                     txt = txt.format(current_arity, g['max_combination'], is_stat_enough.sum())
@@ -60,23 +59,25 @@ def cb_search(g, b, S_tensor, N_tensor, id_combinations, write_cb=True):
                 else:
                     cb_passed = cb.loc[is_stat_enough,cb_passed_columns].reset_index(drop=True)
                 if len(set(cb_passed.loc[:,id_columns].values.ravel().tolist())) < current_arity:
-                    end_flag = 1
                     cb = pandas.DataFrame()
+                    txt = 'Arity (K) = {:,}: No branch combination satisfied --cutoff_stat. Ending higher-order search at K = {:,}.'
+                    print(txt.format(current_arity, current_arity))
                     break
                 g,id_combinations = combination.get_node_combinations(g=g, cb_passed=cb_passed, cb_all=False,
                                                                       arity=current_arity, check_attr='name')
             else:
                 txt = 'Arity (K) = {:,}: Exhaustive search with {:,} K-1 branch combinations'
                 print(txt.format(current_arity, cb.shape[0]))
-                g['df_cb_stats'].loc[current_arity - 1, 'mode'] = 'exhaustive'
+                g['df_cb_stats'].at[0, 'mode'] = 'exhaustive'
                 cb_passed = cb.loc[:,cb_passed_columns].reset_index(drop=True)
                 g,id_combinations = combination.get_node_combinations(g=g, cb_passed=cb_passed, cb_all=True,
                                                                       arity=current_arity, check_attr='name')
         else:
             raise Exception('Invalid arity: {}'.format(current_arity))
         if id_combinations.shape[0] == 0:
-            end_flag = 1
             cb = pandas.DataFrame()
+            txt = 'Arity (K) = {:,}: No branch combination satisfied phylogenetic independence. Ending higher-order search at K = {:,}.'
+            print(txt.format(current_arity, current_arity))
             break
         print('Preparing OCS table with {:,} process(es).'.format(g['threads']), flush=True)
         cbS = substitution.get_cb(id_combinations, S_tensor, g, 'OCS')
@@ -89,14 +90,14 @@ def cb_search(g, b, S_tensor, N_tensor, id_combinations, write_cb=True):
         if (g['calibrate_longtail']):
             if (g['exhaustive_until'] >= current_arity):
                 cb = omega.calibrate_dsc(cb)
-                g['df_cb_stats'].loc[current_arity - 1, 'dSC_calibration'] = 'Y'
+                g['df_cb_stats'].at[0, 'dSC_calibration'] = 'Y'
             else:
                 txt = '--calibrate_longtail is deactivated for arity = {}. '
                 txt += 'This option is effective for the arity range specified by --exhaustive_until.\n'
                 sys.stderr.write(txt.format(current_arity))
-                g['df_cb_stats'].loc[current_arity - 1, 'dSC_calibration'] = 'N'
+                g['df_cb_stats'].at[0, 'dSC_calibration'] = 'N'
         else:
-            g['df_cb_stats'].loc[current_arity - 1, 'dSC_calibration'] = 'N'
+            g['df_cb_stats'].at[0, 'dSC_calibration'] = 'N'
         if g['branch_dist']:
             cb = tree.get_node_distance(tree=g['tree'], cb=cb, ncpu=g['threads'], float_type=g['float_type'])
         cb = substitution.get_substitutions_per_branch(cb, b, g)
@@ -115,17 +116,12 @@ def cb_search(g, b, S_tensor, N_tensor, id_combinations, write_cb=True):
         g = foreground.add_median_cb_stats(g, cb, current_arity, start)
         if (g['fg_clade_permutation']>0):
             g = foreground.clade_permutation(cb, g)
-        if end_flag:
-            txt = 'No branch combination satisfied phylogenetic independence. Ending higher-order search at K = {:,}.'
-            print(txt.format(current_arity))
-            break
+        g['df_cb_stats'] = g['df_cb_stats'].loc[:, sorted(g['df_cb_stats'].columns.tolist())]
+        g['df_cb_stats_main'] = pandas.concat([g['df_cb_stats_main'], g['df_cb_stats']], ignore_index=True)
         if current_arity == g['max_arity']:
             txt = 'Maximum arity (K = {:,}) reached. Ending higher-order search of branch combinations.'
             print(txt.format(g['max_arity']))
             break
-    g['df_cb_stats'] = g['df_cb_stats'].loc[(~g['df_cb_stats'].loc[:,'elapsed_sec'].isnull()),:]
-    g['df_cb_stats'] = g['df_cb_stats'].loc[:, sorted(g['df_cb_stats'].columns.tolist())]
-    g['df_cb_stats_main'] = pandas.concat([g['df_cb_stats_main'], g['df_cb_stats']], ignore_index=True)
     return g,cb
 
 def main_analyze(g):
